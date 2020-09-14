@@ -6,4 +6,4 @@ for i = 1:length(A)
     max_val = A(i)
   endif
 endfor
-disp(A(i));
+disp(max_val);
