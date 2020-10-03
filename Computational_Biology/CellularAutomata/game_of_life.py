@@ -2,7 +2,6 @@ from time import sleep
 
 class CellularAutomata:
     def __init__(self, n, states, init_state):
-        self.d = 2
         self.n = n
         self.init_state = init_state
         self._mat = [[self.init_state] * self.n for _ in range(self.n)]
