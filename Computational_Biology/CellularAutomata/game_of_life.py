@@ -1,45 +1,16 @@
 from time import sleep
+import os
+import ipdb
+import traceback
+import sys
+import numpy as np
+from pprint import pprint
 
-class CellularAutomata:
-    def __init__(self, n, states, init_state):
-        self.n = n
-        self.init_state = init_state
-        self._mat = [[self.init_state] * self.n for _ in range(self.n)]
-        self._gen_id = 0
-
-    def get_neighborhood(self, i, j):
-        raise NotImplementedError()
-
-    def transition_rule(self, cur_state, states):
-        raise NotImplementedError()
-
-    def next(self):
-        new_mat = [[self.init_state] * self.n for _ in range(self.n)]
-        for i in range(self.n):
-            for j in range(self.n):
-                new_mat[i][j] = self.transition_rule(
-                    self._mat[i][j],
-                    self.get_neighborhood(i, j)
-                )
-        self._gen_id += 1
-        self._mat = new_mat
-
-    def set_state(self, i, j, state):
-        self._mat[i][j] = state
-
-    def display(self):
-        output = ''
-        output += '-' * self.n
-        for i in range(self.n):
-            for j in range(self.n):
-                output += {0: ' ', 1: 'O'}[self._mat[i][j]]
-            output += '\n'
-        output += '-' * self.n
-        print(output + '\n')
+from cellular_automata import CellularAutomata
 
 class GameOfLife(CellularAutomata):
     def __init__(self, n):
-        super().__init__(n, [0, 1], 0)
+        super().__init__(d=2, n=n, states=[0, 1], init_state=0)
 
     def get_neighborhood(self, i, j):
         neighbors = []
@@ -63,6 +34,16 @@ class GameOfLife(CellularAutomata):
                 return 0
         #happens only if cur_state == 0
         return cur_state
+
+    def display(self):
+        output = ''
+        output += '-' * self.n + '\n'
+        for i in range(self.n):
+            for j in range(self.n):
+                output += {0: ' ', 1: 'O'}[self._mat[i][j]]
+            output += '\n'
+        output += '-' * self.n
+        print(output + '\n')
 
 class CLI:
     def __init__(self):
@@ -127,7 +108,7 @@ class CLI:
         except:
             print('Invalid parameter')
             return None
-        return reS
+        return res
 
     def blink(self):
         """Put blink pattern"""
@@ -140,8 +121,8 @@ class CLI:
             return
 
         for i in range(3):
-            self._ca.set_state(pos[0] + {'h': 0, 'v': 1}[h_or_v] * i,
-                    pos[1] + {'h': 1, 'v': 0}[h_or_v] * i,
+            self._ca.set_state((pos[0] + {'h': 0, 'v': 1}[h_or_v] * i,
+                    pos[1] + {'h': 1, 'v': 0}[h_or_v] * i),
                     1)
 
     def display(self):
@@ -158,7 +139,7 @@ class CLI:
         state = self._input_num('insert state: ')
         if not pos or not state:
             return
-        self._ca.set_state(pos[0], pos[1], state)
+        self._ca.set_state(pos, state)
 
     def block(self):
         """insert block"""
@@ -167,7 +148,60 @@ class CLI:
             return
         for i in range(2):
             for j in range(2):
-                self._ca.set_state(pos[0] + i, pos[1] + j, 1)
+                self._ca.set_state((pos[0] + i, pos[1] + j), 1)
+
+    def glider(self):
+        """insert glider"""
+        pos = self._get_pos_input()
+        if not pos:
+            return
+        glider_shape = [
+                [0, 0, 1],
+                [1, 0, 1],
+                [0, 1, 1]
+        ]
+        for i in range(len(glider_shape)):
+            for j in range(len(glider_shape[i])):
+                self._ca.set_state((pos[0] + i, pos[1] + j), glider_shape[i][j])
+
+    def load_shape(self):
+        """load shape to the board from file"""
+        path = input("Insert shape path: ")
+        if not os.path.exists(path):
+            print('Error: file not exists')
+            return
+        shape = np.load(path)
+        pos = self._get_pos_input()
+        if not pos:
+            return
+        for i in range(len(shape)):
+            for j in range(len(shape[i])):
+                self._ca.set_state((pos[0] + i, pos[1] + j), shape[i][j])
+
+    def dump_shape(self):
+        """assemble a shape and dump it to a file"""
+        if np.all(self._ca._mat == self._ca.init_state):
+            print('Error: the board is empty!')
+            return
+        path = input('Insert path: ')
+        shape = np.copy(self._ca._mat)
+        i = 0
+        while i < shape.shape[0]:
+            if all(x == 0 for x in shape[i]):
+                #remove this row
+                shape = np.delete(shape, i, 0)
+            else:
+                i += 1
+
+        j = 0
+        while j < shape.shape[1]:
+            if all(x == 0 for x in shape[:,j]):
+                #remove this row
+                shape = np.delete(shape, j, 1)
+            else:
+                j += 1
+        
+        shape.dump(path)
 
     def animate(self):
         """play an animation until Ctrl+C pressed"""
@@ -179,10 +213,50 @@ class CLI:
         except KeyboardInterrupt:
             pass
 
+    def debug(self):
+        """open ipdb"""
+        ipdb.set_trace()
 
-def main():
+    def load(self):
+        """load a prepared board"""
+        path = input("Insert board data path: ")
+        if not os.path.exists(path):
+            print('File not exists!')
+            return
+        with open(path, 'rb') as fp:
+            data = fp.read()
+        self._ca.loads(data)
+
+    def dump(self):
+        """dump the CA's board to a file"""
+        path = input("Insert board data path: ")
+        data = self._ca.dumps()
+        with open(path, 'wb') as fp:
+            fp.write(data)
+
+    def rot90(self):
+        """rotate the board by 90 degrees"""
+        self._ca._mat = np.rot90(self._ca._mat)
+
+    def clear(self):
+        """clear the board"""
+        self._ca._mat.fill(self._ca.init_state)
+
+
+def main(cmd=None, *args):
+    if cmd == 'disp':
+        path = args[0]
+        board = np.load(path)
+        pprint(board)
+        return
+
     cli = CLI()
-    cli.run()
+    try:
+        cli.run()
+    except:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        ipdb.post_mortem(tb)
 
 if __name__ == '__main__':
-    main()
+    main(*sys.argv[1:])

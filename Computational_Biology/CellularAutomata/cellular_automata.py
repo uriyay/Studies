@@ -13,11 +13,12 @@ class CellularAutomata:
         self._gen_id = 0
 
     def iterate_matrix(self):
-        return itertools.product(*[range(n) for _ in range(self.d)])
+        return itertools.product(*[range(self.n) for _ in range(self.d)])
 
     def _init_matrix(self):
         matrix = np.zeros([self.n for _ in range(self.d)], dtype=int)
         matrix.fill(self.init_state)
+        return matrix
 
     def get_neighborhood(self, pos):
         raise NotImplementedError()
@@ -31,7 +32,7 @@ class CellularAutomata:
             new_mat.__setitem__(pos,
                     self.transition_rule(
                         self._mat.__getitem__(pos),
-                        self.get_neighborhood(pos)
+                        self.get_neighborhood(*pos)
                     )
             )
         self._gen_id += 1
@@ -39,3 +40,9 @@ class CellularAutomata:
 
     def set_state(self, pos, state):
         self._mat.__setitem__(pos, state)
+
+    def dump(self):
+        return self._mat.dumps()
+
+    def load(self, data):
+        self._mat = np.loads(data)
