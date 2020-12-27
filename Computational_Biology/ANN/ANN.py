@@ -65,7 +65,7 @@ class Perceptron:
     def _get_wheights(self):
         return [x[1] for x in self.output.inputs]
 
-    def fit(self, X, Y, max_iterations=None):
+    def fit(self, X, Y, max_iterations=None, learning_rate=1):
         #init the network
         if len(X) == 0:
             raise Exception("zero samples given")
@@ -80,6 +80,7 @@ class Perceptron:
         while max_iterations is None or (k < max_iterations):
             self.logger.info("iteration %d" % (k))
             is_perfect_wheighted = True
+            number_of_fixes = 0
             for x,y in zip(X,Y):
                 #init the inputs to be x
                 self._set_inputs(x)
@@ -87,6 +88,7 @@ class Perceptron:
                 x_class = self.output.activate()
                 if x_class != y:
                     is_perfect_wheighted = False
+                    number_of_fixes += 1
 
                     #the classification is incorrect
                     if y == 1:
@@ -99,13 +101,15 @@ class Perceptron:
                     self.logger.debug("class incorrect (%s instead of %s)" % (x_class, y))
                     self.logger.debug("current wheights: %s" % (self._get_wheights()))
                     for idx, inp in enumerate(self.output.inputs):
-                        inp[1] += (x[idx] * sign)
+                        inp[1] += (x[idx] * sign * learning_rate)
                     self.logger.debug("updated to new wheights: %s" % (self._get_wheights()))
             if is_perfect_wheighted:
                 is_learning_succeeded = True
                 self.logger.debug("Learning done!")
                 break
 
+            success_ratio = (len(X) - number_of_fixes)/len(X) * 100
+            self.logger.info(f"number of fixes: {number_of_fixes}, success ratio = {success_ratio}")
             k += 1
 
         if is_learning_succeeded:
