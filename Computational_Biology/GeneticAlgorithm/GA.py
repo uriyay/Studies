@@ -86,7 +86,6 @@ class GA:
         return False
 
     def crossover(self, parent1, parent2, pc):
-        assert len(parent1) == len(parent2)
         resulting_chromosomes = []
         if random.random() < pc:
             points = []
