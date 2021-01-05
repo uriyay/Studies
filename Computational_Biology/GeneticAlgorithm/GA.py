@@ -55,15 +55,16 @@ class GA:
         self.total_fitness = None
 
     def run(self):
+        self.current_fitnesses = [self.fitness_func(x) for x in self.population]
         while not self.end_condition(self.population, self.generation_id):
             self.population = self.next_generation()
+            self.current_fitnesses = [self.fitness_func(x) for x in self.population]
             if self.post_build_event:
                 self.population = self.post_build_event(self.population)
             self.generation_id += 1
 
     def next_generation(self):
         new_pop = []
-        self.current_fitnesses = [self.fitness_func(x) for x in self.population]
         self.total_fitness = sum(self.current_fitnesses)
         print('Generation {}, fitness: max = {}, min = {}, avg. = {}, total_fitness = {}'.format(
             self.generation_id,
