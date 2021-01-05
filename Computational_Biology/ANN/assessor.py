@@ -54,11 +54,16 @@ class Assessor:
     def assess(self, samples, values):
         #reinitialize the solver
         self.init_solver()
-        result = True
+        result = 1
+        fails = 0
+        last_solver = self.solver
         for x,y in zip(samples, values):
+            last_solver = copy.copy(self.solver)
             result = self.assess_sample(x, y)
             if not result:
-                break
+                fails += 1
+                self.solver = last_solver
+        result = (len(samples) - fails)/len(samples)
         return result
 
 class ComplexAssersor(Assessor):
