@@ -18,6 +18,13 @@ class Tanh(ActivationFunc):
         #according to wolfarm alpha
         return 4/((e**(-x) + e**x)**2)
 
+class Sigmoid(ActivationFunc):
+    def __call__(self, x):
+        return 1/(1 + e**(-x))
+
+    def get_derivative(self, x):
+        return e**x/((e**x + 1)**2)
+
 class Neuron:
     def __init__(self, threshold, activation_func=None):
         self.threshold = threshold
@@ -26,6 +33,8 @@ class Neuron:
         self.weights = np.array([], dtype=np.float32)
         #last value when this neuron was activated
         self.last_val = None
+        #last value without the threshold or the activation_func
+        self.last_val_h = None
         self.activation_func = activation_func
 
     def connect(self, output, wheight):
@@ -50,6 +59,8 @@ class Neuron:
 
     def _activate_input(self, neuron):
         if isinstance(neuron, Neuron):
+            if neuron.last_val is not None:
+                return neuron.last_val
             return neuron.activate()
         else:
             #its a basic type - an input or bias
@@ -58,12 +69,15 @@ class Neuron:
     def activate(self):
         inputs = np.array([self._activate_input(n) for n in self.inputs])
         result = np.dot(inputs, self.weights)
+        self.last_val_h = result
         if self.activation_func:
             result = self.activation_func(result)
-        if result >= self.threshold:
-            self.last_val = 1
         else:
-            self.last_val = -1
+            if result >= self.threshold:
+                result = 1
+            else:
+                result = 0 #-1
+        self.last_val = result
         return self.last_val
 
 def test_majority(x1, x2, x3):
@@ -165,7 +179,7 @@ class NetworkArch:
         @param outputs_count: the number of outputs neurons
         @param inners_count: a list of counts of each inner layer, by order
         """
-        self.layers_counts = [inputs_count] + inners_count + [outputs_count]
+        self.layers_counts = [inputs_count] + list(inners_count) + [outputs_count]
         #a dict of (n1_index, n2_index) -> weight
         self.edges = {}
         #a dict of n1_index -> n2_index
@@ -197,7 +211,7 @@ class NetworkArch:
 
 
 class BackpropNetwork:
-    def __init__(self, network_arch, threshold=0, log_level=logging.INFO):
+    def __init__(self, network_arch, threshold=0, activation_func=None, log_level=logging.INFO):
         self.threshold = threshold
         self.output = None
         logging.basicConfig()
@@ -210,15 +224,16 @@ class BackpropNetwork:
         #a list of tuples of (neuron, input_index)
         self.second_layer_neurons = []
         #add the inputs layer
-        self.network.append(np.array([0] * self.network_arch.layer_counts[0]))
-        for layer_counts in range(self.network_arch.layers_counts[1:]):
+        self.network.append(np.array([0] * self.network_arch.layers_counts[0]))
+        for layer_counts in self.network_arch.layers_counts[1:]:
             self.network.append([])
             for i in range(layer_counts):
-                n = Neuron(threshold=threshold)
+                n = Neuron(threshold=threshold, activation_func=activation_func)
                 self.network[-1].append(n)
 
         #connect the neurons according to the edges given by self.network_arch
-        for src, dst, weight in self.network_arch.edges.items():
+        for src_dst, weight in self.network_arch.edges.items():
+            src, dst = src_dst
             src_n = self.network[src[0]][src[1]]
             dst_n = self.network[dst[0]][dst[1]]
             #add input to dst_n
@@ -230,10 +245,17 @@ class BackpropNetwork:
                 self.second_layer_neurons.append((dst_n, input_index))
 
     def _set_inputs(self, x):
+        self.network[0] = np.array(x)
         #set the inputs of the first layer
         for dst, input_index in self.second_layer_neurons:
             #input_index is also an index in x, since x is a sample for the full input layer
             dst.inputs[input_index] = x[input_index]
+
+    def _clear_last_val(self):
+        for layer_id in range(1, len(self.network)):
+            for n in self.network[layer_id]:
+                n.last_val = None
+                n.last_val_h = None
 
     def backprop(self, y, learning_rate=1):
         #deltas is a dict of (layer_id, neuron_id) -> delta
@@ -248,7 +270,7 @@ class BackpropNetwork:
                     #so the derivative is 1
                     g_d = 1
                 else:
-                    g_d = neuron.activation_func.get_derivative(neuron.last_val)
+                    g_d = neuron.activation_func.get_derivative(neuron.last_val_h)
                 sum_signals = 0
                 if layer_index == len(self.network) - 1:
                     #its the output layer
@@ -262,11 +284,15 @@ class BackpropNetwork:
 
         #update weights
         for layer_id in range(len(self.network)):
-            for index in self.network_arch.layer_counts[layer_id]:
+            for index in range(self.network_arch.layers_counts[layer_id]):
                 n_index = (layer_id, index)
                 src = self.network[layer_id][index]
                 #the source neuron value
-                S = src.last_val
+                S = None
+                if layer_id == 0:
+                    S = src
+                else:
+                    S = src.last_val
                 for dst_neuron in self.network_arch.src_to_dest[n_index]:
                     old_weight = self.network_arch.edges[(n_index, dst_neuron)]
                     #the error signal of dest neuron
@@ -277,7 +303,7 @@ class BackpropNetwork:
                     #update in self.network
                     dst = self.network[dst_neuron[0]][dst_neuron[1]]
                     #find according to object id, should be fast enough
-                    weight_index = dst.inputs.find(src)
+                    weight_index = dst.inputs.index(src)
                     dst.weights[weight_index] = new_weight
 
     def fit(self, X, Y, max_iterations=None, learning_rate=1):
@@ -290,9 +316,34 @@ class BackpropNetwork:
                 n, self.network_arch.layers_counts[0]))
         if not all(n == len(smpl) for smpl in X):
             raise Exception("not all of the inputs has the same shape")
-        #start with calculating the result of the outputs neurons
-        for output in self.network[-1]:
-            output.activate()
-        #next, calc the error signals
-        self.calc_error_signals()
+        for x,y in zip(X, Y):
+            import ipdb; ipdb.set_trace()
+            self._clear_last_val()
+            self._set_inputs(x)
+            #start with calculating the result of the outputs neurons
+            for output in self.network[-1]:
+                output.activate()
+            #run backprop algorithm
+            self.backprop(y, learning_rate=learning_rate)
         
+
+def test_backprop():
+    net_arch = NetworkArch(3, 1, 3)
+    net_arch.connect((0, 0), (1, 0), -0.1) #w1
+    net_arch.connect((0, 0), (1, 1), 0) #w2
+
+    net_arch.connect((0, 1), (1, 0), 0.1) #w3
+    net_arch.connect((0, 1), (1, 1), 0.2) #w4
+
+    net_arch.connect((0, 2), (1, 0), 0.1) #w5
+    net_arch.connect((0, 2), (1, 1), -0.2) #w6
+
+    net_arch.connect((1, 0), (2, 0), 0.1) #w7
+    net_arch.connect((1, 1), (2, 0), -0.3) #w8
+    net_arch.connect((1, 2), (2, 0), 0) #w9
+
+    sigmoid = Sigmoid()
+    net = BackpropNetwork(net_arch, activation_func=sigmoid)
+    X = [(0,1, -1), (1,1, -1)]
+    Y = [(1,), (0,)]
+    net.fit(X, Y, learning_rate=0.5)
