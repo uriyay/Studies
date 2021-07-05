@@ -151,19 +151,22 @@ parser = yacc.yacc()
 
 # logic truth tree
 class TruthTree:
-    def __init__(self, formula):
-        self.formula = formula
+    def __init__(self, text):
+        self.text = text
         self.ast = None
         self.has_errors = False
 
     def check(self):
-        self.ast = parser.parse(self.formula, debug=False)
+        self.ast = parser.parse(self.text, debug=False)
+        import ipdb; ipdb.set_trace()
         if has_tokenizing_error or has_syntax_error:
             self.has_errors = True
 
 
-def main(formula):
-    TruthTree = LogicTruthTree(formula)
+def main(path):
+    with open(path) as fp:
+        text = fp.read()
+    TruthTree = LogicTruthTree(text)
     truthTree.check()
 
 if __name__ == '__main__':
