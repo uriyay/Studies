@@ -105,13 +105,13 @@ def p_formula(p):
 
 def p_formula_empty(p):
     'formula : newline'
-    p[0] = []
+    p[0] = tuple()
 
 def p_S_ID(p):
     '''
     S : ID
     '''
-    p[0] = ('S', 'ID', p[1:])
+    p[0] = ('S', 'id', p[1])
 
 def p_S_predict(p):
     '''
@@ -123,43 +123,43 @@ def p_S_NOT(p):
     '''
     S : NOT S
     '''
-    p[0] = ('S', 'not', p[1:])
+    p[0] = ('S', 'not', p[2])
 
 def p_S_AND(p):
     '''
     S : LPAREN S AND S RPAREN
     '''
-    p[0] = ('S', 'and', p[1:])
+    p[0] = ('S', 'and', p[2], p[4])
 
 def p_S_OR(p):
     '''
     S : LPAREN S OR S RPAREN
     '''
-    p[0] = ('S', 'or', p[1:])
+    p[0] = ('S', 'or', p[2], p[4])
 
 def p_S_IMPL(p):
     '''
     S : LPAREN S IMPL S RPAREN
     '''
-    p[0] = ('S', 'impl', p[1:])
+    p[0] = ('S', 'impl', p[2], p[4])
 
 def p_S_EQUIV(p):
     '''
     S : LPAREN S EQUIV S RPAREN
     '''
-    p[0] = ('S', 'equiv', p[1:])
+    p[0] = ('S', 'equiv', p[2], p[4])
 
 def p_S_FORALL(p):
     '''
     S : FORALL ID S
     '''
-    p[0] = ('S', 'forall', p[1:])
+    p[0] = ('S', 'forall', p[2], p[3])
 
 def p_S_EXISTS(p):
     '''
     S : EXISTS ID S
     '''
-    p[0] = ('S', 'exists', p[1:])
+    p[0] = ('S', 'exists', p[2], p[3])
 
 def p_predict(p):
     'predict : PREDICT id_list'
@@ -182,30 +182,73 @@ def p_empty(p):
 parser = yacc.yacc()
 
 # logic truth tree
+class InconsistencyError(Exception):
+    pass
+
+class Terminal:
+    def __init__(self, name, is_negated=False):
+        self.name = name
+        self.is_negated = is_negated
+
+    def __eq__(self, other):
+        return self.name == other.name and self.is_negated == other.is_negated
+
 class Node:
     def __init__(self):
         self.formulas = []
+        self.terminals = []
         self.left = None
         self.right = None
-        #list of formulas that we done handling them
-        self.done = []
+        self.parent = None
+        self.delayed = []
 
     def add(self, formula):
-        self.formulas.append(formula)
+        if formula not in self.formulas:
+            self.formulas.append(formula)
 
-    def set_done(self, formula):
-        if formula in self.done:
-            raise Exception('already done')
-        self.done.append(formula)
+    def add_terminal(self, terminal):
+        if terminal not in self.terminals:
+            self.terminals.append(terminal)
 
-    def is_done(self, formula):
-        return formula in self.done
+    def check(self):
+        stack = []
+        cur = self
+        results = []
+        while cur:
+            if cur.left:
+                stack.append(cur.left)
+            if cur.right:
+                stack.append(self.right)
+            if not cur.left and not cur.right:
+                #its a leaf
+                results.append(self.check_leaf(cur))
+            #next
+            cur = stack.pop() if stack else None
+        return any(results)
+
+    def check_leaf(self, leaf):
+        #go backward and check for terminals or negated terminals
+        terminals = []
+        cur = leaf
+        while cur:
+            for t in self.terminals:
+                if any(x.is_negated != t.is_negated for x in terminals):
+                    #found contradiction!
+                    print('found terminal {}{} while there is {}{}'.format(
+                        '¬' if t.is_negated else '', t.name, '¬' if not t.is_negated else '', t.name))
+                    return False
+                terminals.append(t)
+            #next
+            cur = cur.parent
+        return True
 
     def branch(self, formula1, formula2):
         self.left = Node()
         self.right = Node()
         self.left.add(formula1)
         self.right.add(formula2)
+        self.left.parent = self
+        self.right.parent = self
 
 class TruthTree:
     def __init__(self, text):
@@ -219,20 +262,42 @@ class TruthTree:
         if has_tokenizing_error or has_syntax_error:
             self.has_errors = True
         result = self.handle()
+        print('The tree is {}consistent'.format('in' if not result else ''))
         return result
 
     def handle(self):
-        #return True IFF any of the truth tree branches are true
-        return any(self.handle_formulas(self.ast))
+        self.handle_formulas(self.ast)
+        return self.root.check()
 
     def handle_formulas(self, formulas):
         #we need to make the tree from the all of the formulas together, not every formula by itself
         #each node will be a list of facts
         #each branch is a disunication
         #we want to first add all the none-branching formulas, then the branching ones
+        #each time handle_formula() is called and a branch is made - get the lowest level and split it
         for formula in formulas:
-            self.handle_formula
+            self.handle_formula(formula, self.root)
 
+    def handle_formula(self, formula, node):
+        self.handle_S(formula, node)
+
+    def handle_S(self, S, node):
+        S_type = S[1]
+        getattr(self, 'handle_S_' + S_type)(S[2], node)
+
+    def handle_S_and(self, S, node):
+        #add the 2 formulas to node
+        self.handle_S(S[2], node)
+        self.handle_S(S[3], node)
+
+    def handle_S_id(self, var, node):
+        #add this var to the current node
+        node.add_terminal(Terminal(var))
+
+    def handle_S_not(self, expr, node):
+        if expr[1] == 'id':
+            #add the negated var
+            node.add_terminal(Terminal(expr[2], is_negated=True))
 
 
 def main(path):
