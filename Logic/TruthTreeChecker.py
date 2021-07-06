@@ -182,9 +182,6 @@ def p_empty(p):
 parser = yacc.yacc()
 
 # logic truth tree
-class InconsistencyError(Exception):
-    pass
-
 class Terminal:
     def __init__(self, name, is_negated=False):
         self.name = name
@@ -236,7 +233,7 @@ class Node:
         while cur:
             for t in cur.terminals:
                 if any(x.is_negated != t.is_negated for x in terminals):
-                    #found contradiction!
+                    #found inconsistency
                     print('found terminal {}{} while there is {}{} on this branch'.format(
                         '¬' if t.is_negated else '', t.name, '¬' if not t.is_negated else '', t.name))
                     return False
@@ -269,9 +266,7 @@ class TruthTree:
         return result
 
     def handle(self):
-        self.handle_formulas(self.ast)
-        import ipdb; ipdb.set_trace()
-        return self.root.check()
+        return self.handle_formulas(self.ast)
 
     def handle_formulas(self, formulas):
         #we need to make the tree from the all of the formulas together, not every formula by itself
@@ -280,32 +275,32 @@ class TruthTree:
         #we want to first add all the none-branching formulas, then the branching ones
         #each time handle_formula() is called and a branch is made - get the lowest level and split it
         for formula in formulas:
-            self.handle_formula(formula, self.root)
+            if not self.handle_formula(formula, self.root):
+                return False
+        return True
 
     def handle_formula(self, formula, node):
-        self.handle_S(formula, node)
+        return self.handle_S(formula, node)
 
     def handle_S(self, S, node):
         S_type = S[1]
-        getattr(self, 'handle_S_' + S_type)(S, node)
+        print('handle_S_{}, S={}'.format(S_type, S))
+        return getattr(self, 'handle_S_' + S_type)(S, node)
 
     def handle_S_and(self, S, node):
         #add the 2 formulas to node
-        self.handle_S(S[2], node)
-        self.handle_S(S[3], node)
+        return self.handle_S(S[2], node) and self.handle_S(S[3], node)
 
     def handle_S_or(self, S, node):
         #split the node
         node.branch(S[2], S[3])
-        self.handle_S(S[2], node.left)
-        self.handle_S(S[3], node.right)
+        return self.handle_S(S[2], node.left) or self.handle_S(S[3], node.right)
 
     def handle_S_impl(self, S, node):
         #S[2] -> S[3] <=> ¬S[2] ∨ S[3]
         neg_S2 = ('S', 'not', S[2])
         node.branch(neg_S2, S[3])
-        self.handle_S(neg_S2, node.left)
-        self.handle_S(S[3], node.right)
+        return self.handle_S(neg_S2, node.left) or self.handle_S(S[3], node.right)
 
     def handle_S_equiv(self, S, node):
         #S[2] <-> S[3] <=> (S[2] ∧ S[3]) ∨ (¬S[2] ∧ ¬S[3])
@@ -314,42 +309,44 @@ class TruthTree:
         opt1 = ('S', 'and', S[2], S[3])
         opt2 = ('S', 'and', neg_S2, neg_S3)
         node.branch(opt1, opt2)
-        self.handle_S(opt1, node.left)
-        self.handle_S(opt2, node.right)
+        return self.handle_S(opt1, node.left) or self.handle_S(opt2, node.right)
 
     def handle_S_id(self, S, node):
         #add this var to the current node
         node.add_terminal(Terminal(S[2]))
+        #check to see if its still consistent
+        return node.check_leaf(node)
 
     def handle_S_not(self, S, node):
         expr = S[2]
         if expr[1] == 'id':
             #add the negated var
             node.add_terminal(Terminal(expr[2], is_negated=True))
+            #check to see if its still consistent
+            return node.check_leaf(node)
         elif expr[1] == 'not':
             #double negation
             #!!p == q
             #just don't handle the negation
-            self.handle_S(expr[2], node)
+            return self.handle_S(expr[2], node)
         elif expr[1] == 'and':
             #!(p && q) == (!p || !q)
             #split
             neg_expr2 = ('S', 'not', expr[2])
             neg_expr3 = ('S', 'not', expr[3])
             node.branch(neg_expr2, neg_expr3)
-            self.handle_S(neg_expr2, node.left)
-            self.handle_S(neg_expr3, node.right)
+            return self.handle_S(neg_expr2, node.left) or self.handle_S(neg_expr3, node.right)
         elif expr[1] == 'or':
             #!(p || q) == (!p && !q)
             neg_expr2 = ('S', 'not', expr[2])
             neg_expr3 = ('S', 'not', expr[3])
             new_S = ('S', 'and', neg_expr2, neg_expr3)
-            self.handle_S(new_S, node)
+            return self.handle_S(new_S, node)
         elif expr[1] == 'impl':
             #!(p -> q) == !(!p || q) == (p && !q)
             neg_expr3 = ('S', 'not', expr[3])
             new_S = ('S', 'and', expr[2], neg_expr3)
-            self.handle_S(new_S, node)
+            return self.handle_S(new_S, node)
         elif expr[1] == 'equiv':
             #!(p <-> q) == (p && !q) || (!p && q)
             neg_expr2 = ('S', 'not', expr[2])
@@ -357,10 +354,7 @@ class TruthTree:
             opt1 = ('S', 'and', expr[2], neg_expr3)
             opt2 = ('S', 'and', neg_expr2, expr[3])
             node.branch(opt1, opt2)
-            self.handle_S(opt1, node.left)
-            self.handle_S(opt2, node.right)
-
-
+            return self.handle_S(opt1, node.left) or self.handle_S(opt2, node.right)
 
 def main(path):
     with open(path) as fp:
