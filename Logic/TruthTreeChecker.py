@@ -193,6 +193,9 @@ class Terminal:
     def __eq__(self, other):
         return self.name == other.name and self.is_negated == other.is_negated
 
+    def __repr__(self):
+        return '<Terminal {}{}>'.format('¬' if self.is_negated else '', self.name)
+
 class Node:
     def __init__(self):
         self.formulas = []
@@ -231,10 +234,10 @@ class Node:
         terminals = []
         cur = leaf
         while cur:
-            for t in self.terminals:
+            for t in cur.terminals:
                 if any(x.is_negated != t.is_negated for x in terminals):
                     #found contradiction!
-                    print('found terminal {}{} while there is {}{}'.format(
+                    print('found terminal {}{} while there is {}{} on this branch'.format(
                         '¬' if t.is_negated else '', t.name, '¬' if not t.is_negated else '', t.name))
                     return False
                 terminals.append(t)
@@ -267,6 +270,7 @@ class TruthTree:
 
     def handle(self):
         self.handle_formulas(self.ast)
+        import ipdb; ipdb.set_trace()
         return self.root.check()
 
     def handle_formulas(self, formulas):
@@ -283,21 +287,79 @@ class TruthTree:
 
     def handle_S(self, S, node):
         S_type = S[1]
-        getattr(self, 'handle_S_' + S_type)(S[2], node)
+        getattr(self, 'handle_S_' + S_type)(S, node)
 
     def handle_S_and(self, S, node):
         #add the 2 formulas to node
         self.handle_S(S[2], node)
         self.handle_S(S[3], node)
 
-    def handle_S_id(self, var, node):
-        #add this var to the current node
-        node.add_terminal(Terminal(var))
+    def handle_S_or(self, S, node):
+        #split the node
+        node.branch(S[2], S[3])
+        self.handle_S(S[2], node.left)
+        self.handle_S(S[3], node.right)
 
-    def handle_S_not(self, expr, node):
+    def handle_S_impl(self, S, node):
+        #S[2] -> S[3] <=> ¬S[2] ∨ S[3]
+        neg_S2 = ('S', 'not', S[2])
+        node.branch(neg_S2, S[3])
+        self.handle_S(neg_S2, node.left)
+        self.handle_S(S[3], node.right)
+
+    def handle_S_equiv(self, S, node):
+        #S[2] <-> S[3] <=> (S[2] ∧ S[3]) ∨ (¬S[2] ∧ ¬S[3])
+        neg_S2 = ('S', 'not', S[2])
+        neg_S3 = ('S', 'not', S[3])
+        opt1 = ('S', 'and', S[2], S[3])
+        opt2 = ('S', 'and', neg_S2, neg_S3)
+        node.branch(opt1, opt2)
+        self.handle_S(opt1, node.left)
+        self.handle_S(opt2, node.right)
+
+    def handle_S_id(self, S, node):
+        #add this var to the current node
+        node.add_terminal(Terminal(S[2]))
+
+    def handle_S_not(self, S, node):
+        expr = S[2]
         if expr[1] == 'id':
             #add the negated var
             node.add_terminal(Terminal(expr[2], is_negated=True))
+        elif expr[1] == 'not':
+            #double negation
+            #!!p == q
+            #just don't handle the negation
+            self.handle_S(expr[2], node)
+        elif expr[1] == 'and':
+            #!(p && q) == (!p || !q)
+            #split
+            neg_expr2 = ('S', 'not', expr[2])
+            neg_expr3 = ('S', 'not', expr[3])
+            node.branch(neg_expr2, neg_expr3)
+            self.handle_S(neg_expr2, node.left)
+            self.handle_S(neg_expr3, node.right)
+        elif expr[1] == 'or':
+            #!(p || q) == (!p && !q)
+            neg_expr2 = ('S', 'not', expr[2])
+            neg_expr3 = ('S', 'not', expr[3])
+            new_S = ('S', 'and', neg_expr2, neg_expr3)
+            self.handle_S(new_S, node)
+        elif expr[1] == 'impl':
+            #!(p -> q) == !(!p || q) == (p && !q)
+            neg_expr3 = ('S', 'not', expr[3])
+            new_S = ('S', 'and', expr[2], neg_expr3)
+            self.handle_S(new_S, node)
+        elif expr[1] == 'equiv':
+            #!(p <-> q) == (p && !q) || (!p && q)
+            neg_expr2 = ('S', 'not', expr[2])
+            neg_expr3 = ('S', 'not', expr[3])
+            opt1 = ('S', 'and', expr[2], neg_expr3)
+            opt2 = ('S', 'and', neg_expr2, expr[3])
+            node.branch(opt1, opt2)
+            self.handle_S(opt1, node.left)
+            self.handle_S(opt2, node.right)
+
 
 
 def main(path):
